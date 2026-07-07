@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Тесты — Шарпология · Сергей Балакирев</title>
+<title>Тесты — Диагностика по методу Шарпа · Сергей Балакирев</title>
 <link href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400&family=PT+Sans:wght@400;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -252,7 +252,7 @@ nav{position:sticky;top:0;z-index:99;background:var(--bg);border-bottom:1px soli
 </nav>
 
 <div class="hero">
-  <span class="hero-kicker">Самодиагностика · Шарпология</span>
+  <span class="hero-kicker">Самодиагностика · Метод Шарпа</span>
   <h1 class="hero-title">Тесты по неврозам</h1>
   <p class="hero-lead">Пройдите тест по одному или нескольким неврозам. После прохождения вы увидите результат, а психолог получит ваши ответы для подготовки к консультации.</p>
 </div>
@@ -434,13 +434,13 @@ function getCurrentUserKey() {
   return user.email || user.name || null;
 }
 
-function saveResult(email, testName, score, maxScore, pct, sectionResults, date) {
+function saveResult(email, testName, score, maxScore, pct, sectionResults, date, answersArr) {
   const key = getStorageKey(email);
   let data = [];
   try { data = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
   let testEntry = data.find(d => d.testName === testName);
   if (!testEntry) { testEntry = {testName, history: []}; data.push(testEntry); }
-  testEntry.history.push({date, score, maxScore, pct, sections: sectionResults.map(s=>({title:s.title,score:s.score,max:s.max}))});
+  testEntry.history.push({date, score, maxScore, pct, sections: sectionResults.map(s=>({title:s.title,score:s.score,max:s.max})), answers: answersArr || null});
   localStorage.setItem(key, JSON.stringify(data));
 }
 
@@ -1356,7 +1356,9 @@ async function submitTest() {
   const cu2 = currentUser ? JSON.parse(currentUser) : null;
   const saveKey = email || (cu2 && cu2.email ? cu2.email : null) || name || (cu2 && cu2.name ? cu2.name : null);
   if (saveKey) {
-    saveResult(saveKey, test.name, totalScore, maxScore, pct, sectionResults, new Date().toLocaleDateString('ru-RU'));
+    const totalQ = test.sections.reduce((a,s)=>a+s.questions.length,0);
+    const answersArr = Array.from({length: totalQ}, (_,i)=> (answers[i] !== undefined ? answers[i] : null));
+    saveResult(saveKey, test.name, totalScore, maxScore, pct, sectionResults, new Date().toLocaleDateString('ru-RU'), answersArr);
   }
 
   // Показываем результат
@@ -1570,6 +1572,22 @@ function showSummary() {
   sumEl.classList.add('visible');
 
   if (name) document.getElementById('summarySubtitle').textContent = `Карта неврозов для ${name}`;
+
+  // Радар на экране
+  const radarItemsScreen = TESTS.map(test => {
+    const entry = history.find(h => h.testName === test.name);
+    const pct = (entry && entry.history.length) ? entry.history[entry.history.length-1].pct : null;
+    return {label: test.name, pct};
+  });
+  let radarHolder = document.getElementById('summaryRadar');
+  if (!radarHolder) {
+    radarHolder = document.createElement('div');
+    radarHolder.id = 'summaryRadar';
+    radarHolder.style.cssText = 'text-align:center;margin:8px 0 20px';
+    const grid0 = document.getElementById('summaryGrid');
+    grid0.parentNode.insertBefore(radarHolder, grid0);
+  }
+  radarHolder.innerHTML = buildRadarSVG(radarItemsScreen).replace('fill="#444"','fill="rgba(255,255,255,.8)"').replace(/fill="#444"/g,'fill="rgba(255,255,255,.8)"').replace(/stroke="#ddd4c6"/g,'stroke="rgba(255,255,255,.15)"').replace(/fill="#999"/g,'fill="rgba(255,255,255,.45)"');
 
   const levels = ['Низкий','Умеренный','Средний','Высокий','Очень высокий'];
   const colors = ['#6aa84f','#f1c232','#e69138','#cc4125','#990000'];
@@ -1875,6 +1893,39 @@ function goBack() {
 }
 
 // ── ПЕЧАТЬ / PDF ──
+function buildRadarSVG(items) {
+  // items: [{label, pct}] — до 8 осей
+  const size = 380, cx = size/2, cy = size/2, R = 128;
+  const n = items.length;
+  if (n < 3) return '';
+  const angle = i => -Math.PI/2 + i * 2*Math.PI/n;
+  const pt = (i, r) => `${(cx + r*Math.cos(angle(i))).toFixed(1)},${(cy + r*Math.sin(angle(i))).toFixed(1)}`;
+  let grid = '';
+  [0.2,0.4,0.6,0.8,1].forEach(f => {
+    const pts = items.map((_,i)=>pt(i, R*f)).join(' ');
+    grid += `<polygon points="${pts}" fill="none" stroke="#ddd4c6" stroke-width="1"/>`;
+  });
+  let axes = '', labels = '';
+  items.forEach((it,i) => {
+    axes += `<line x1="${cx}" y1="${cy}" x2="${pt(i,R).split(',')[0]}" y2="${pt(i,R).split(',')[1]}" stroke="#ddd4c6" stroke-width="1"/>`;
+    const lx = cx + (R+30)*Math.cos(angle(i)), ly = cy + (R+30)*Math.sin(angle(i));
+    const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
+    const short = it.label.length > 14 ? it.label.substring(0, 13) + '…' : it.label;
+    labels += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="10" font-weight="700" fill="#444" text-anchor="${anchor}" dominant-baseline="middle">${short}</text>
+      <text x="${lx.toFixed(1)}" y="${(ly+12).toFixed(1)}" font-size="10" fill="#999" text-anchor="${anchor}" dominant-baseline="middle">${it.pct === null ? '—' : it.pct + '%'}</text>`;
+  });
+  const valuePts = items.map((it,i)=>pt(i, R * Math.max(0.02,(it.pct||0)/100))).join(' ');
+  const dots = items.map((it,i)=>{
+    const p = pt(i, R * Math.max(0.02,(it.pct||0)/100)).split(',');
+    return `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#1A7E94"/>`;
+  }).join('');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+    ${grid}${axes}
+    <polygon points="${valuePts}" fill="rgba(26,126,148,.18)" stroke="#1A7E94" stroke-width="2"/>
+    ${dots}${labels}
+  </svg>`;
+}
+
 function printSummary() {
   const user = getCurrentUser();
   const name = user ? (user.name || 'Клиент') : 'Клиент';
@@ -1897,6 +1948,7 @@ function printSummary() {
   }
 
   // Build HTML for PDF
+  const TOP_CHARGED = [];
   let testsHtml = '';
   TESTS.forEach(test => {
     const entry = history.find(h => h.testName === test.name);
@@ -1916,6 +1968,34 @@ function printSummary() {
       const dcolor = delta < 0 ? '#2d7d46' : delta > 0 ? '#cc2200' : '#999';
       const darrow = delta < 0 ? '↓' : delta > 0 ? '↑' : '→';
       deltaHtml = `<span style="color:${dcolor};font-weight:700;font-size:13px;margin-left:12px">${darrow} ${Math.abs(delta)}%</span>`;
+    }
+
+    // Пункты: восстанавливаем вопросы из теста, ответы из last.answers
+    let itemsHtml = '';
+    if (last.answers && last.answers.length) {
+      const itemColors = {3:'#f4cccc', 2:'#fce8b2', 1:'#fff8e1', 0:'#ffffff'};
+      const itemText = {3:'#990000', 2:'#b06000', 1:'#8a7a3a', 0:'#bbb'};
+      let gq = 0;
+      let rows = '';
+      test.sections.forEach(section => {
+        let secRows = '';
+        section.questions.forEach(qText => {
+          const a = last.answers[gq];
+          if (a !== undefined && a !== null && a > 0) {
+            secRows += `<tr style="border-bottom:1px solid #f0ebe0">
+              <td style="padding:3px 8px;color:#444;font-size:10px;line-height:1.45">${qText}</td>
+              <td style="padding:3px 8px;text-align:center;width:44px;background:${itemColors[a]};color:${itemText[a]};font-weight:700;font-size:10px">${a}/3</td>
+            </tr>`;
+          }
+          if (a === 3) TOP_CHARGED.push({test:test.name, q:qText});
+          gq++;
+        });
+        if (secRows) rows += `<tr><td colspan="2" style="padding:7px 8px 3px;font-weight:700;font-size:10px;color:#1c1a17;text-transform:uppercase;letter-spacing:.4px">${section.title}</td></tr>` + secRows;
+      });
+      if (rows) itemsHtml = `<div style="margin-top:8px">
+        <div style="font-size:10px;color:#888;margin:6px 0 4px">Травмированность по пунктам (показаны утверждения с откликом; 3 — «абсолютно так»)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:10px">${rows}</table>
+      </div>`;
     }
 
     let sectionsHtml = '';
@@ -1960,6 +2040,7 @@ function printSummary() {
         </div>
         ${levelText ? `<div style="background:#f9f6f1;padding:10px 14px;font-size:11px;color:#555;line-height:1.6;margin-bottom:6px">${levelText}</div>` : ''}
         ${sectionsHtml}
+        ${itemsHtml}
       </div>`;
   });
 
@@ -1986,6 +2067,32 @@ function printSummary() {
     </div>`;
   }).join('');
 
+  // Топ заряженных утверждений (ответ 3/3)
+  let topChargedHtml = '';
+  if (TOP_CHARGED.length) {
+    const shown = TOP_CHARGED.slice(0, 15);
+    topChargedHtml = `<div style="padding:4px 32px 16px;page-break-inside:avoid">
+      <div style="font-size:14px;font-weight:700;margin-bottom:4px">Самые заряженные утверждения</div>
+      <div style="font-size:10px;color:#888;margin-bottom:10px">Пункты с максимальным откликом «абсолютно так» (3/3)${TOP_CHARGED.length>15 ? ` · показаны 15 из ${TOP_CHARGED.length}` : ''} — приоритетные точки для работы</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10.5px">
+        ${shown.map(t=>`<tr style="border-bottom:1px solid #f0ebe0">
+          <td style="padding:4px 8px;width:120px;color:#999;font-size:9.5px">${t.test}</td>
+          <td style="padding:4px 8px;color:#333">${t.q}</td>
+          <td style="padding:4px 8px;width:40px;text-align:center;background:#f4cccc;color:#990000;font-weight:700">3/3</td>
+        </tr>`).join('')}
+      </table>
+    </div>
+    <div style="height:2px;background:#1c1a17;margin:0 32px"></div>`;
+  }
+
+  // Радар по всем тестам
+  const radarItems = TESTS.map(test => {
+    const entry = history.find(h => h.testName === test.name);
+    const pct = (entry && entry.history.length) ? entry.history[entry.history.length-1].pct : null;
+    return {label: test.name, pct};
+  });
+  const radarSvg = buildRadarSVG(radarItems);
+
   const fullHtml = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -2001,7 +2108,7 @@ function printSummary() {
   <div style="background:#1c1a17;color:white;padding:28px 32px;display:flex;justify-content:space-between;align-items:flex-end">
     <div>
       <div style="font-size:24px;font-weight:700;margin-bottom:4px">Карта неврозов</div>
-      <div style="font-size:12px;color:#aaa">Диагностика по Методу Шарпа · Шарпология</div>
+      <div style="font-size:12px;color:#aaa">Диагностика по Методу Шарпа</div>
       <div style="font-size:14px;font-weight:700;color:white;margin-top:12px">${name}</div>
       <div style="font-size:11px;color:#888">${email ? email + ' · ' : ''}Дата: ${date}</div>
     </div>
@@ -2015,7 +2122,10 @@ function printSummary() {
   <div style="padding:20px 32px 16px">
     <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#1c1a17">Общая картина</div>
     ${summaryBars}
+    <div style="text-align:center;margin-top:16px;page-break-inside:avoid">${radarSvg}</div>
   </div>
+
+  ${topChargedHtml}
 
   <!-- Линия -->
   <div style="height:2px;background:#1c1a17;margin:0 32px"></div>
@@ -2024,6 +2134,12 @@ function printSummary() {
   <div style="padding:20px 32px">
     <div style="font-size:14px;font-weight:700;margin-bottom:16px">Детальные результаты</div>
     ${testsHtml}
+  </div>
+
+  <!-- Что дальше -->
+  <div style="background:#1c1a17;color:white;padding:20px 32px;page-break-inside:avoid">
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">Что делать с этими результатами</div>
+    <div style="font-size:11.5px;color:#ccc;line-height:1.7">Карта показывает, какие страхи и с какой силой управляют вашими решениями. Каждый из них прорабатывается по методу Шарпа: специалист находит причину заряда и разряжает её, а контрольный замер по этим же тестам показывает динамику в цифрах. Запишитесь на разбор вашей карты к специалисту по методу Шарпа: <a href="https://t.me/Balakirev_ss" style="color:#7fd1e0;text-decoration:underline">t.me/Balakirev_ss</a></div>
   </div>
 
   <!-- Подвал -->
