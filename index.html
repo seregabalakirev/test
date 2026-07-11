@@ -1333,16 +1333,34 @@ async function submitTest() {
     });
   } catch(e) { console.log('Telegram error:', e); }
 
-  // Отправляем подробные ответы вторым сообщением (разбиваем если длинное)
+  // Отправляем подробные ответы: режем по строкам, шлём с паузами и повторами
   try {
-    const chunkSize = 3500;
-    for(let i = 0; i < detailMsg.length; i += chunkSize) {
-      const chunk = (i === 0 ? '' : '...продолжение\n') + detailMsg.slice(i, i + chunkSize);
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({chat_id: CHAT_ID, text: chunk})
-      });
+    const lines = detailMsg.split('\n');
+    const chunks = [];
+    let buf = '';
+    for (const ln of lines) {
+      if ((buf + ln + '\n').length > 3400 && buf) { chunks.push(buf); buf = ''; }
+      buf += ln + '\n';
+    }
+    if (buf.trim()) chunks.push(buf);
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const text = (chunks.length > 1 ? `[часть ${ci+1} из ${chunks.length}]\n` : '') + chunks[ci];
+      let sent = false;
+      for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+        const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({chat_id: CHAT_ID, text: text})
+        });
+        let data = null;
+        try { data = await res.json(); } catch(e) {}
+        if (data && data.ok) { sent = true; }
+        else {
+          const wait = (data && data.parameters && data.parameters.retry_after) ? data.parameters.retry_after * 1000 + 500 : 1600;
+          await new Promise(r => setTimeout(r, wait));
+        }
+      }
+      await new Promise(r => setTimeout(r, 1100));
     }
   } catch(e) { console.log('Detail send error:', e); }
 
