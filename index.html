@@ -1309,8 +1309,7 @@ async function submitTest() {
     section.questions.forEach(qText => {
       const aScore = answers[globalQ] !== undefined ? answers[globalQ] : null;
       const aLabel = aScore !== null ? answerLabels[3 - aScore] : '—';
-      const short = qText.length > 55 ? qText.substring(0,55)+'...' : qText;
-      detailText += `  ${globalQ+1}. ${short}\n     → ${aLabel}\n`;
+      detailText += `  ${globalQ+1}. ${qText}\n     → ${aLabel}\n`;
       globalQ++;
     });
   });
@@ -1599,7 +1598,7 @@ function showSummary() {
 
   // Радар на экране
   const radarItemsScreen = TESTS.map(test => {
-    const entry = history.find(h => h.testName === test.name);
+    const entry = findEntryFor(history, test.name);
     const pct = (entry && entry.history.length) ? entry.history[entry.history.length-1].pct : null;
     return {label: test.name, pct};
   });
@@ -1618,7 +1617,7 @@ function showSummary() {
 
   const grid = document.getElementById('summaryGrid');
   grid.innerHTML = TESTS.map(test => {
-    const entry = history.find(h => h.testName === test.name);
+    const entry = findEntryFor(history, test.name);
     if (!entry || !entry.history.length) {
       return `<div class="summary-card not-done">
         <div class="summary-card-name">${test.name}</div>
@@ -1917,6 +1916,12 @@ function goBack() {
 }
 
 // ── ПЕЧАТЬ / PDF ──
+const LEGACY_TEST_NAMES = {}; // только полные обновлённые тесты, старые версии в карту не подхватываем
+function findEntryFor(history, name) {
+  return history.find(h => h.testName === name)
+    || (LEGACY_TEST_NAMES[name] ? history.find(h => h.testName === LEGACY_TEST_NAMES[name]) : undefined);
+}
+
 function buildRadarSVG(items) {
   // items: [{label, pct}] — до 8 осей
   const size = 380, cx = size/2, cy = size/2, R = 128;
@@ -1975,7 +1980,7 @@ function printSummary() {
   const TOP_CHARGED = [];
   let testsHtml = '';
   TESTS.forEach(test => {
-    const entry = history.find(h => h.testName === test.name);
+    const entry = findEntryFor(history, test.name);
     if (!entry || !entry.history.length) return;
     const last = entry.history[entry.history.length - 1];
     const pct = last.pct;
@@ -1994,33 +1999,10 @@ function printSummary() {
       deltaHtml = `<span style="color:${dcolor};font-weight:700;font-size:13px;margin-left:12px">${darrow} ${Math.abs(delta)}%</span>`;
     }
 
-    // Пункты: восстанавливаем вопросы из теста, ответы из last.answers
-    let itemsHtml = '';
-    if (last.answers && last.answers.length) {
-      const itemColors = {3:'#f4cccc', 2:'#fce8b2', 1:'#fff8e1', 0:'#ffffff'};
-      const itemText = {3:'#990000', 2:'#b06000', 1:'#8a7a3a', 0:'#bbb'};
-      let gq = 0;
-      let rows = '';
-      test.sections.forEach(section => {
-        let secRows = '';
-        section.questions.forEach(qText => {
-          const a = last.answers[gq];
-          if (a !== undefined && a !== null && a > 0) {
-            secRows += `<tr style="border-bottom:1px solid #f0ebe0">
-              <td style="padding:3px 8px;color:#444;font-size:10px;line-height:1.45">${qText}</td>
-              <td style="padding:3px 8px;text-align:center;width:44px;background:${itemColors[a]};color:${itemText[a]};font-weight:700;font-size:10px">${a}/3</td>
-            </tr>`;
-          }
-          if (a === 3) TOP_CHARGED.push({test:test.name, q:qText});
-          gq++;
-        });
-        if (secRows) rows += `<tr><td colspan="2" style="padding:7px 8px 3px;font-weight:700;font-size:10px;color:#1c1a17;text-transform:uppercase;letter-spacing:.4px">${section.title}</td></tr>` + secRows;
-      });
-      if (rows) itemsHtml = `<div style="margin-top:8px">
-        <div style="font-size:10px;color:#888;margin:6px 0 4px">Травмированность по пунктам (показаны утверждения с откликом; 3 — «абсолютно так»)</div>
-        <table style="width:100%;border-collapse:collapse;font-size:10px">${rows}</table>
-      </div>`;
-    }
+    // Полная матрица: каждый вопрос, каждый ответ, все даты
+    const itemsHtml = (entry.history.some(r=>r.answers&&r.answers.length))
+      ? `<div style="margin-top:10px;page-break-inside:auto">${buildMatrixTable(test.name, true, 'all')}</div>`
+      : '';
 
     let sectionsHtml = '';
     if (last.sections) {
@@ -2066,11 +2048,17 @@ function printSummary() {
         ${sectionsHtml}
         ${itemsHtml}
       </div>`;
+    // топ заряженных: из последнего прохождения с ответами
+    const lastRun = [...entry.history].reverse().find(r=>r.answers&&r.answers.length);
+    if (lastRun) {
+      let gq2 = 0;
+      test.sections.forEach(sec => sec.questions.forEach(q => { if (lastRun.answers[gq2]===3) TOP_CHARGED.push({test:test.name, q}); gq2++; }));
+    }
   });
 
   // Summary bars
   let summaryBars = TESTS.map(test => {
-    const entry = history.find(h => h.testName === test.name);
+    const entry = findEntryFor(history, test.name);
     if (!entry || !entry.history.length) return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;opacity:.4">
       <div style="width:110px;font-size:11px;color:#999;text-align:right">${test.name}</div>
       <div style="flex:1;height:14px;background:#eee;border-radius:2px"></div>
@@ -2111,7 +2099,7 @@ function printSummary() {
 
   // Радар по всем тестам
   const radarItems = TESTS.map(test => {
-    const entry = history.find(h => h.testName === test.name);
+    const entry = findEntryFor(history, test.name);
     const pct = (entry && entry.history.length) ? entry.history[entry.history.length-1].pct : null;
     return {label: test.name, pct};
   });
@@ -2240,16 +2228,16 @@ function renderMatrixTabs() {
   }
   if (!mtxCurrentTest || !available.some(t=>t.name===mtxCurrentTest)) mtxCurrentTest = available[0].name;
   tabsEl.innerHTML = available.map(t =>
-    `<button onclick="mtxCurrentTest='${t.name.replace(/'/g,"\\'")}';renderMatrixTabs()" style="padding:9px 16px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;border-radius:10px;border:1.5px solid ${t.name===mtxCurrentTest?'white':'rgba(255,255,255,.3)'};background:${t.name===mtxCurrentTest?'white':'transparent'};color:${t.name===mtxCurrentTest?'#1c1a17':'white'}">${t.name}</button>`
+    `<button onclick="mtxCurrentTest='${t.name.replace(/'/g,"\\'")}';renderMatrixTabs()" style="padding:9px 16px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;border-radius:10px;border:1.5px solid ${t.name===mtxCurrentTest?'var(--bg-dark)':'var(--border)'};background:${t.name===mtxCurrentTest?'var(--bg-dark)':'white'};color:${t.name===mtxCurrentTest?'white':'var(--text)'}">${t.name}</button>`
   ).join('')
   + `<span style="flex-basis:100%;height:0"></span>`
   + [['all','Все пункты'],['trauma','Травмированные'],['worse','Ухудшения'],['better','Улучшения']].map(([k,label]) =>
-    `<button onclick="mtxFilter='${k}';renderMatrixTabs()" style="padding:7px 14px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;border-radius:99px;border:1.5px solid ${mtxFilter===k?'#d96a52':'rgba(255,255,255,.2)'};background:${mtxFilter===k?'rgba(217,106,82,.18)':'transparent'};color:${mtxFilter===k?'#e8a598':'rgba(255,255,255,.6)'}">${label}</button>`
+    `<button onclick="mtxFilter='${k}';renderMatrixTabs()" style="padding:7px 14px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;border-radius:99px;border:1.5px solid ${mtxFilter===k?'var(--accent)':'var(--border)'};background:${mtxFilter===k?'#fdf0ee':'white'};color:${mtxFilter===k?'var(--accent)':'var(--muted)'}">${label}</button>`
   ).join('');
   document.getElementById('matrixBody').innerHTML = buildMatrixTable(mtxCurrentTest, false);
 }
 
-function buildMatrixTable(testName, forPrint) {
+function buildMatrixTable(testName, forPrint, fltOverride) {
   const history = matrixData();
   const test = TESTS.find(t => t.name === testName);
   const entry = history.find(h => h.testName === testName);
@@ -2259,36 +2247,36 @@ function buildMatrixTable(testName, forPrint) {
   const last = runs[runs.length-1];
   const prev = runs.length > 1 ? runs[runs.length-2] : null;
 
-  const txt = forPrint ? '#333' : 'rgba(255,255,255,.85)';
-  const line = forPrint ? '#e5ddcc' : 'rgba(255,255,255,.1)';
-  const headBg = forPrint ? '#f0ebe0' : 'rgba(255,255,255,.06)';
-  const stickyBg = forPrint ? '#fff' : '#1c1a17';
-  const zebra = forPrint ? '#faf7f0' : 'rgba(255,255,255,.025)';
+  const txt = '#333';
+  const line = '#e5ddcc';
+  const headBg = '#f0ebe0';
+  const stickyBg = '#fff';
+  const zebra = '#faf7f0';
 
   const pill = a => `<span style="display:inline-block;min-width:30px;padding:3px 9px;border-radius:99px;background:${MTX_BG[a]};color:${MTX_FG[a]};font-size:11px;font-weight:800" title="${MTX_ANS[a]}">${a}</span>`;
   const deltaCell = (l, p) => {
-    if (p === null || p === undefined || l === null || l === undefined) return `<td style="padding:6px 8px;text-align:center;color:${forPrint?'#ccc':'rgba(255,255,255,.25)'};font-size:11px">—</td>`;
+    if (p === null || p === undefined || l === null || l === undefined) return `<td style="padding:6px 8px;text-align:center;color:#ccc;font-size:11px">—</td>`;
     const d = l - p;
     if (d < 0) return `<td style="padding:6px 8px;text-align:center;color:#3d8a4e;font-size:12px;font-weight:800" title="улучшение">▼${-d}</td>`;
     if (d > 0) return `<td style="padding:6px 8px;text-align:center;color:#c0392b;font-size:12px;font-weight:800" title="ухудшение">▲${d}</td>`;
-    return `<td style="padding:6px 8px;text-align:center;color:${forPrint?'#bbb':'rgba(255,255,255,.3)'};font-size:11px">·</td>`;
+    return `<td style="padding:6px 8px;text-align:center;color:#bbb;font-size:11px">·</td>`;
   };
 
   // Сводка изменений
   const traumaOf = r => r.answers.filter(a=>a===3||a===2).length;
   const tLast = traumaOf(last);
   let summaryChips = `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;align-items:center">`;
-  summaryChips += `<span style="padding:8px 16px;border-radius:12px;background:${forPrint?'#f0ebe0':'rgba(255,255,255,.07)'};color:${forPrint?'#1c1a17':'white'};font-size:13px;font-weight:700">Травмированных сейчас: ${tLast} из ${last.answers.filter(a=>a!==null&&a!==undefined).length}</span>`;
+  summaryChips += `<span style="padding:8px 16px;border-radius:12px;background:#f0ebe0;color:#1c1a17;font-size:13px;font-weight:700">Травмированных сейчас: ${tLast} из ${last.answers.filter(a=>a!==null&&a!==undefined).length}</span>`;
   if (prev) {
     const tPrev = traumaOf(prev);
     const d = tLast - tPrev;
-    const col = d<0 ? '#3d8a4e' : (d>0 ? '#c0392b' : (forPrint?'#888':'rgba(255,255,255,.5)'));
+    const col = d<0 ? '#3d8a4e' : (d>0 ? '#c0392b' : '#888');
     const sign = d<0 ? '▼'+(-d) : (d>0 ? '▲'+d : 'без изменений');
-    summaryChips += `<span style="padding:8px 16px;border-radius:12px;background:${forPrint?'#f0ebe0':'rgba(255,255,255,.07)'};color:${col};font-size:13px;font-weight:800">${prev.date} → ${last.date}: ${sign}</span>`;
+    summaryChips += `<span style="padding:8px 16px;border-radius:12px;background:#f0ebe0;color:${col};font-size:13px;font-weight:800">${prev.date} → ${last.date}: ${sign}</span>`;
   }
-  summaryChips += `<span style="font-size:11px;color:${forPrint?'#888':'var(--muted)'}">3 «абсолютно так» · 2 «в большей степени» · 1 «в меньшей степени» · 0 «не так»</span></div>`;
+  summaryChips += `<span style="font-size:11px;color:#888">3 «абсолютно так» · 2 «в большей степени» · 1 «в меньшей степени» · 0 «не так»</span></div>`;
 
-  const flt = forPrint ? mtxFilter : mtxFilter; // печать печатает текущий фильтр
+  const flt = fltOverride || mtxFilter;
   const rowPass = idx => {
     const l = last.answers[idx];
     if (flt === 'trauma') return l === 3 || l === 2;
@@ -2309,7 +2297,7 @@ function buildMatrixTable(testName, forPrint) {
     const secTrauma = idxs.filter(i=>{const a=last.answers[i];return a===3||a===2}).length;
     const passIdxs = idxs.filter(rowPass);
     if (passIdxs.length) {
-      rows += `<tr><td colspan="${runs.length + (prev?2:1)}" style="padding:14px 10px 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${forPrint?'#1c1a17':'white'}">${section.title} <span style="font-weight:400;color:${forPrint?'#999':'rgba(255,255,255,.4)'};text-transform:none;letter-spacing:0">· травмировано ${secTrauma} из ${section.questions.length}</span></td></tr>`;
+      rows += `<tr><td colspan="${runs.length + (prev?2:1)}" style="padding:14px 10px 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#1c1a17">${section.title} <span style="font-weight:400;color:#999;text-transform:none;letter-spacing:0">· травмировано ${secTrauma} из ${section.questions.length}</span></td></tr>`;
       let z = 0;
       section.questions.forEach((qText,k) => {
         const idx = gq + k;
@@ -2319,7 +2307,7 @@ function buildMatrixTable(testName, forPrint) {
           <td style="padding:7px 10px;font-size:${forPrint?'10px':'12.5px'};color:${txt};line-height:1.5;position:sticky;left:0;background:${stickyBg}">${qText}</td>`
           + runs.map(r => {
             const a = r.answers[idx];
-            if (a === undefined || a === null) return `<td style="padding:7px 10px;text-align:center;color:${forPrint?'#ccc':'rgba(255,255,255,.25)'};font-size:11px">—</td>`;
+            if (a === undefined || a === null) return `<td style="padding:7px 10px;text-align:center;color:#ccc;font-size:11px">—</td>`;
             return `<td style="padding:7px 10px;text-align:center">${pill(a)}</td>`;
           }).join('')
           + (prev ? deltaCell(last.answers[idx], prev.answers[idx]) : '') + '</tr>';
@@ -2328,7 +2316,7 @@ function buildMatrixTable(testName, forPrint) {
     }
     gq += section.questions.length;
   });
-  if (!visible) rows = `<tr><td colspan="${runs.length + (prev?2:1)}" style="padding:20px 10px;font-size:13px;color:${forPrint?'#888':'var(--muted)'}">По выбранному фильтру пунктов нет. Это хорошая новость.</td></tr>`;
+  if (!visible) rows = `<tr><td colspan="${runs.length + (prev?2:1)}" style="padding:20px 10px;font-size:13px;color:#888">По выбранному фильтру пунктов нет. Это хорошая новость.</td></tr>`;
 
   const cSpan = prev ? 1 : 0;
   const counters = [3,2,1,0].map(level => {
@@ -2336,12 +2324,12 @@ function buildMatrixTable(testName, forPrint) {
       + runs.map(r => `<td style="padding:6px 10px;text-align:center;font-size:11px;font-weight:700;color:${txt}">${r.answers.filter(a=>a===level).length}</td>`).join('')
       + (prev?'<td></td>':'') + '</tr>';
   }).join('');
-  const trauma = `<tr style="border-top:2px solid ${forPrint?'#1c1a17':'white'}"><td style="padding:9px 10px;font-size:12px;font-weight:800;color:${forPrint?'#1c1a17':'white'};position:sticky;left:0;background:${stickyBg}">Сумма травмированных</td>`
-    + runs.map(r => `<td style="padding:9px 10px;text-align:center;font-size:13px;font-weight:800;border-radius:8px;background:${forPrint?'#1c1a17':'white'};color:${forPrint?'white':'#1c1a17'}">${traumaOf(r)}</td>`).join('')
+  const trauma = `<tr style="border-top:2px solid #1c1a17"><td style="padding:9px 10px;font-size:12px;font-weight:800;color:#1c1a17;position:sticky;left:0;background:${stickyBg}">Сумма травмированных</td>`
+    + runs.map(r => `<td style="padding:9px 10px;text-align:center;font-size:13px;font-weight:800;border-radius:8px;background:#1c1a17;color:white">${traumaOf(r)}</td>`).join('')
     + (prev ? deltaCell(tLast, traumaOf(prev)).replace('font-size:12px','font-size:14px') : '') + '</tr>';
 
   return summaryChips + `<table style="border-collapse:collapse;width:100%;min-width:560px">${head}${rows}${counters}${trauma}</table>
-    <div style="margin-top:12px;font-size:11px;color:${forPrint?'#888':'var(--muted)'}">Сумма травмированных = ответы «3» и «2». Δ = изменение между двумя последними прохождениями: ▼ лучше, ▲ хуже.</div>`;
+    <div style="margin-top:12px;font-size:11px;color:#888">Сумма травмированных = ответы «3» и «2». Δ = изменение между двумя последними прохождениями: ▼ лучше, ▲ хуже.</div>`;
 }
 
 let mtxFilter = 'all';
@@ -2402,7 +2390,7 @@ window.addEventListener('load', () => { updateTestsProgress(); });
     <p style="color:var(--muted);font-size:14px;max-width:640px">Каждый ответ на каждое утверждение по всем прохождениям теста. Сохраняется для прохождений после обновления системы.</p>
   </div>
   <div id="matrixTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px"></div>
-  <div style="margin-bottom:18px"><button onclick="printMatrix()" style="padding:10px 20px;background:transparent;color:white;border:1.5px solid rgba(255,255,255,.5);font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer">⬡ Скачать PDF матрицы</button></div>
+  <div style="margin-bottom:18px"><button onclick="printMatrix()" style="padding:10px 20px;background:var(--bg-dark);color:white;border:none;border-radius:10px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer">⬡ Скачать PDF матрицы</button></div>
   <div id="matrixBody" style="overflow-x:auto"></div>
 </div>
 
