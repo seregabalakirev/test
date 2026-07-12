@@ -402,7 +402,7 @@ nav{position:sticky;top:0;z-index:99;background:var(--bg);border-bottom:1px soli
 
 <script>
 const BOT_TOKEN = '8916019034:AAHMc6N45rot8CIBHl9HzKr9ySE4QpaML-s';
-const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzjOvzrvfGKYbPpKD0mRbbuIUA99N89r1OTlmA_qgXBTZwCkL2zNOSXn7qcAsTFPYCkgw/exec';
+const SHEETS_URL_V2 = 'ВСТАВИТЬ_URL_НОВОГО_СКРИПТА'; // после деплоя Apps Script
 
 // ── ЛИЧНЫЙ КАБИНЕТ ──
 function getStorageKey(id) { return 'sharpo_' + (id || '').toLowerCase().trim().replace(/\s+/g, '_'); }
@@ -1364,32 +1364,35 @@ async function submitTest() {
     }
   } catch(e) { console.log('Detail send error:', e); }
 
-  // Отправляем данные в Google Таблицу
+  // Отправляем данные в Google Таблицу клиента (формат: лист = тест, колонка = дата)
   try {
-    // Собираем все вопросы и ответы
-    const allQuestions = [];
-    const allAnswers = [];
-    const answerLabelsSheets = ['Абсолютно так', 'В большей степени так', 'В меньшей степени так', 'Не так'];
-    let gq = 0;
-    test.sections.forEach(section => {
-      section.questions.forEach(qText => {
-        allQuestions.push(qText);
-        const aScore = answers[gq] !== undefined ? answers[gq] : null;
-        allAnswers.push(aScore !== null ? answerLabelsSheets[3 - aScore] : 'Нет ответа');
-        gq++;
+    if (SHEETS_URL_V2.indexOf('http') === 0) {
+      const allQuestions = [];
+      const allAnswers = [];
+      const answerLabelsSheets = ['Абсолютно так', 'В большей степени так', 'В меньшей степени так', 'Не так'];
+      let gq = 0;
+      test.sections.forEach(section => {
+        section.questions.forEach(qText => {
+          allQuestions.push(qText);
+          const aScore = answers[gq] !== undefined ? answers[gq] : null;
+          allAnswers.push(aScore !== null ? answerLabelsSheets[3 - aScore] : 'Нет ответа');
+          gq++;
+        });
       });
-    });
-
-    await fetch(SHEETS_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        testName: test.name,
-        clientName: name,
-        clientEmail: email,
-        questions: allQuestions,
-        answers: allAnswers
-      })
-    });
+      await fetch(SHEETS_URL_V2, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({
+          testName: test.name,
+          clientName: name,
+          clientEmail: email,
+          date: new Date().toLocaleDateString('ru-RU'),
+          sections: test.sections.map(s => ({ title: s.title, count: s.questions.length })),
+          questions: allQuestions,
+          answers: allAnswers
+        })
+      });
+    }
   } catch(e) { console.log('Sheets error:', e); }
 
   // Сохраняем в личный кабинет (по email или имени)
@@ -1966,7 +1969,7 @@ function buildRadarSVG(items) {
     const p = pt(i, R * Math.max(0.02,(it.pct||0)/100)).split(',');
     return `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#1A7E94"/>`;
   }).join('');
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="max-width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">
     ${grid}${axes}
     <polygon points="${valuePts}" fill="rgba(26,126,148,.18)" stroke="#1A7E94" stroke-width="2"/>
     ${dots}${labels}
